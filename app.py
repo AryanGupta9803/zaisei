@@ -1,4 +1,4 @@
-from flask import Flask, render_template, redirect, request
+from flask import Flask, request, jso
 import firebase_admin
 from firebase_admin import credentials, auth
 from firebase_admin import firestore
@@ -27,12 +27,19 @@ def login(users, passw) {
 
 @app.route('/signup/<string:users>/<string:passw>')
 def signup(users, passw) {
+    doc_ref = users_ref.document(users)
+    doc = doc_ref.get()
+    if doc.exists:
+        return jsonify({"success": False})
+
     data = {"user": users, "pass": passw}
     users_ref.document(users).set(data)
     doc_ref = users_ref.document(users)
     doc = doc_ref.get()
+
     if doc.exists:
         return jsonify({"success": True})
-    else:
-        return jsonify({"success": False})
+
+    return jsonify({"success": False})
 }
+
