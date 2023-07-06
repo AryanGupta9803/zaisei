@@ -28,6 +28,16 @@ db = firestore.client()
 
 users_ref = db.collection('user-info')
 company_ref = db.collection('company-info')
+port_ref = db.collection('user-portfolio')
+
+def check_user(users, passw):
+    doc_ref = users_ref.document(users)
+    doc = doc_ref.get()
+    if doc.exists:
+        details = doc.to_dict()
+        if details['user-id'] == users and details['password'] == passw:
+            return True
+    return False
 
 @app.route('/')
 def base():
@@ -71,7 +81,7 @@ def signup(users, passw) :
 
     return jsonify({"status": 'signup unsuccessful'})
 
-@app.route('/reset-password/<string:users>/<string:old_passw>/<string:passw>')
+@app.route('/<string:users>/<string:old_passw>/reset-password/<string:passw>')
 def reset_password(users, old_passw, passw) :
     doc_ref = users_ref.document(users)
     doc = doc_ref.get()
@@ -84,11 +94,9 @@ def reset_password(users, old_passw, passw) :
         else: 
             return jsonify({'status': 'wrong existing password'})
     return jsonify({'status': 'unkown error'})
-    
-    
 
 
-@app.route('/delete-account/<string:users>/<string:passw>')
+@app.route('/<string:users>/<string:passw>/delete-account/')
 def delete_account(users, passw):
     doc_ref = users_ref.document(users)
     doc = doc_ref.get()
@@ -172,6 +180,75 @@ def generate_portfolio_returns_int(amount, returns):
         return jsonify(data)
     return jsonify({'status': 'failed'})
 
+
+@app.route('/<string:users>/<string:passw>/portfolio/')
+def user_portfolio(users, passw):
+    login_det = check_user(users, passw)
+    if login_det == True:
+        doc_ref = port_ref.document(users)
+        doc = doc_ref.get()
+        if doc.exists:
+            details = doc.to_dict()
+            if details == {} :
+                return jsonify({'status': 'please add your portfolio first'})
+            return jsonify(details)
+        else:
+            return jsonify({'status': 'please add your portfolio first'})
+    else:
+        return jsonify({'status': 'please check user details'})     
+
+@app.route('/<string:users>/<string:passw>/portfolio/add/<string:symbol>/<int:amount>/')
+def add_user_portfolio(users, passw, symbol, amount):
+    login_det = check_user(users, passw)
+    if login_det == True:
+        doc_ref = port_ref.document(users)
+        doc = doc_ref.get()
+        if doc.exists:
+            details = doc.to_dict()
+            if symbol in details.keys():
+                return jsonify({'status': 'please use update to change a particular stock'})
+            details[symbol] = amount
+            port_ref.document(users).set(details)
+            return jsonify({'status': 'portfolio updated'})
+        data = {symbol : amount}
+        port_ref.document(users).set(data)
+        return jsonify({'status': 'portfolio updated'})
+    else:
+        return jsonify({'status': 'please check user details'})
+
+@app.route('/<string:users>/<string:passw>/portfolio/update/<string:symbol>/<int:amount>/')
+def update_user_portfolio(users, passw, symbol, amount):
+    login_det = check_user(users, passw)
+    if login_det == True:
+        doc_ref = port_ref.document(users)
+        doc = doc_ref.get()
+        if doc.exists:
+            details = doc.to_dict()
+            if symbol in details.keys():
+                details[symbol] = amount
+                port_ref.document(users).set(details)
+                return jsonify({'status': 'portfolio updated'})
+            return jsonify({'status': 'please use add to add a new stock'})
+        return jsonify({'status': 'please add a portfolio item first'})
+    else:
+        return jsonify({'status': 'please check user details'})
+
+@app.route('/<string:users>/<string:passw>/portfolio/delete/<string:symbol>/')
+def delete_user_portfolio(users, passw, symbol):
+    login_det = check_user(users, passw)
+    if login_det == True:
+        doc_ref = port_ref.document(users)
+        doc = doc_ref.get()
+        if doc.exists:
+            details = doc.to_dict()
+            if symbol in details.keys():
+                del(details[symbol])
+                port_ref.document(users).set(details)
+                return jsonify({'status': 'portfolio updated'})
+            return jsonify({'status': 'item not present in portfolio'})
+        return jsonify({'status': 'please add a portfolio item first'})
+    else:
+        return jsonify({'status': 'please check user details'})
 
 port = int(os.environ.get('PORT', 8080))
 if __name__ == '__main__':
