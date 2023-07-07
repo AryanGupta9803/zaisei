@@ -35,13 +35,17 @@ def check_user(users, passw):
     doc = doc_ref.get()
     if doc.exists:
         details = doc.to_dict()
+        if "date-pass" not in details.keys():
+            details['date-pass'] = datetime.now().strftime("%y%m%d")
+        if int(datetime.now().strftime("%y%m%d")) > int(details["date-pass"]) + 300 :
+            return jsonify({'status': 'password expired. please reset password to continue'})
         if details['user-id'] == users and details['password'] == passw:
             return True
     return False
 
 @app.route('/')
 def base():
-    date = datetime.now().strftime("%d/%m/%y")
+    date = datetime.now().strftime("%y%m%d")
     return jsonify({"now":date})
 
 
@@ -49,20 +53,24 @@ def base():
 def baseLogin() :
     return jsonify({"success": False})
 
-
 @app.route('/login/<string:users>/<string:passw>')
 def login(users, passw):
     doc_ref = users_ref.document(users)
     doc = doc_ref.get()
     if doc.exists:
         details = doc.to_dict()
+         if "date-pass" not in details.keys():
+            details['date-pass'] = datetime.now().strftime("%y%m%d")
         if details['user-id'] == users and details['password'] == passw:
+            if int(datetime.now().strftime("%y%m%d")) > int(details["date-pass"]) + 300 :
+                return jsonify({'status': 'password expired. please reset password to continue'})
+            details['last-login'] = datetime.now().strftime("%y%m%d")
+            users_ref.document(users).set(details)
             return jsonify({"status": 'logged in'})
         else:
             return jsonify({"status": 'incorrect password'})
     else:
         return jsonify({"status": 'user does not exist'})
-
 
 @app.route('/signup/<string:users>/<string:passw>')
 def signup(users, passw) :
@@ -71,7 +79,8 @@ def signup(users, passw) :
     if doc.exists:
         return jsonify({"status": 'user already exists'})
 
-    data = {"user-id": users, "password": passw}
+    data = {"user-id": users, "password": passw, 
+            "date-created": datetime.now().strftime("%y%m%d"), "date-pass": datetime.now().strftime("%y%m%d")}
     users_ref.document(users).set(data)
     doc_ref = users_ref.document(users)
     doc = doc_ref.get()
@@ -88,13 +97,12 @@ def reset_password(users, old_passw, passw) :
     if doc.exists:
         details = doc.to_dict()
         if details['user-id'] == users and details['password'] == old_passw:
-            data = {"user-id": users, "password": passw}
+            data = {"user-id": users, "password": passw, "date-pass": datetime.now().strftime("%y%m%d")}
             users_ref.document(users).set(data)
             return jsonify({"status": 'password updated'})
         else: 
             return jsonify({'status': 'wrong existing password'})
     return jsonify({'status': 'unkown error'})
-
 
 @app.route('/<string:users>/<string:passw>/delete-account/')
 def delete_account(users, passw):
@@ -116,11 +124,13 @@ def get_financials(symbol):
     doc = doc_ref.get()
     if doc.exists:
         details = doc.to_dict()
-        return jsonify(details)
-
+        if 'date-fetched' in details.keys():
+            if int(datetime.now().strftime("%y%m%d")) > details['date-fetched'] + 100:
+                return jsonify(details)
     url = 'https://www.alphavantage.co/query?function=OVERVIEW&symbol=' + symbol + '&apikey=SEG3HCAR2PT57BNC'
     r = requests.get(url)
     data = r.json()
+    data["date-fetched"] = datetime.now().strftime("%y%m%d")
     if data == {}:
             data_up = {'status': 'no data available'}
             company_ref.document(symbol).set(data_up)
@@ -180,7 +190,6 @@ def generate_portfolio_returns_int(amount, returns):
         return jsonify(data)
     return jsonify({'status': 'failed'})
 
-
 @app.route('/<string:users>/<string:passw>/portfolio/')
 def user_portfolio(users, passw):
     login_det = check_user(users, passw)
@@ -208,9 +217,10 @@ def add_user_portfolio(users, passw, symbol, amount):
             if symbol in details.keys():
                 return jsonify({'status': 'please use update to change a particular stock'})
             details[symbol] = amount
+            details['last-update'] = datetime.now().strftime("%y%m%d")
             port_ref.document(users).set(details)
             return jsonify({'status': 'portfolio updated'})
-        data = {symbol : amount}
+        data = {symbol : amount, 'last-update': datetime.now().strftime("%y%m%d")}
         port_ref.document(users).set(data)
         return jsonify({'status': 'portfolio updated'})
     else:
@@ -226,6 +236,7 @@ def update_user_portfolio(users, passw, symbol, amount):
             details = doc.to_dict()
             if symbol in details.keys():
                 details[symbol] = amount
+                details['last-update'] = datetime.now().strftime("%y%m%d")
                 port_ref.document(users).set(details)
                 return jsonify({'status': 'portfolio updated'})
             return jsonify({'status': 'please use add to add a new stock'})
@@ -243,6 +254,7 @@ def delete_user_portfolio(users, passw, symbol):
             details = doc.to_dict()
             if symbol in details.keys():
                 del(details[symbol])
+                details['last-update'] = datetime.now().strftime("%y%m%d")
                 port_ref.document(users).set(details)
                 return jsonify({'status': 'portfolio updated'})
             return jsonify({'status': 'item not present in portfolio'})
@@ -250,6 +262,26 @@ def delete_user_portfolio(users, passw, symbol):
     else:
         return jsonify({'status': 'please check user details'})
 
+@app.route('/<string:users>/<string:passw>/portfolio/evaluate')
+def portfolio_evaluator(users, passw):
+    if check_user(users, passw):
+        doc_ref = port_ref.document(users)
+        doc = doc_ref.get()
+        if doc.exists and doc.to_dict() != {} :
+            portfolio = doc.to_dict()
+            total_amount = 0
+            nrisky = 0
+            last_update = portfolio['last-update']
+            for i in portfolio.keys():
+                total_amount = total_amount + portfolio[i]
+                if i.lowercase() == "fd" or i.lowercase() == "bonds":
+                    nrisky = nrisky + portfolio[i]
+            if total_amount *0.4 < nrisky :
+                return jsonify({"portfolio-last-updated-at (yymmdd)": last_update, "return": 8,"risk": 4})
+            else:
+                return jsonify({"portfolio-last-updated-at (yymmdd)": last_update, "return": 12, "risk": 10})
+        return jsonify({'status':'please build portfolio before evaluation'})
+    return jsonify({'status': 'please check user details'})
 port = int(os.environ.get('PORT', 8080))
 if __name__ == '__main__':
     app.run(threaded=True, host='0.0.0.0', port=port)
