@@ -92,6 +92,8 @@ def signup(users, passw) :
 
 @app.route('/<string:users>/<string:old_passw>/reset-password/<string:passw>')
 def reset_password(users, old_passw, passw) :
+    if old_passw == passw:
+        return jsonify({'status': 'New password cannot be the same as old password'})
     doc_ref = users_ref.document(users)
     doc = doc_ref.get()
     if doc.exists:
